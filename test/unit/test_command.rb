@@ -13,6 +13,13 @@ module SSHKit
       assert_equal '/usr/bin/env example', c.to_command
     end
 
+    def test_in_docker
+      SSHKit.config = nil
+      SSHKit.config.command_map.docker_string[:bundle] = "docker run --rm -v ruby"
+      c = Command.new(:bundle, '--version')
+      assert_equal "docker run --rm -v ruby /bin/bash -c '/usr/bin/env bundle --version'", c.to_command
+    end
+
     def test_not_mapping_a_builtin
       %w{if test time}.each do |builtin|
         c = Command.new(builtin)

@@ -197,6 +197,11 @@ desirable.
 *Note:* All keys should be symbolised, as the *Command* object will symbolize it's
 first argument before attempting to find it in the *command map*.
 
+If you wnat containerize your application with Docker:
+```ruby
+SSHKit.config.command_map.docker_string[:bundle] = "docker run --rm ruby"
+```
+
 ## Output Handling
 
 ![Example Output](https://raw.github.com/leehambley/sshkit/master/assets/images/example_output.png)

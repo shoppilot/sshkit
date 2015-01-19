@@ -33,6 +33,20 @@ module SSHKit
       end
     end
 
+    class DockerStringProvider
+      def initialize
+        @storage = CommandHash.new
+      end
+
+      def []=(command, docker_string)
+        @storage[command] = docker_string
+      end
+
+      def [](command)
+        @storage[command]
+      end
+    end
+
     def initialize(value = nil)
       @map = CommandHash.new(value || defaults)
     end
@@ -50,6 +64,10 @@ module SSHKit
 
     def prefix
       @prefix ||= PrefixProvider.new
+    end
+
+    def docker_string
+      @docker_string ||= DockerStringProvider.new
     end
 
     def []=(command, new_command)

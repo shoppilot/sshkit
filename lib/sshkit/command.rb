@@ -187,15 +187,23 @@ module SSHKit
       #"newgrp #{options[:group]} <<EOC \\\"%s\\\" EOC" % %Q{#{yield}}
     end
 
+    def docker(&block)
+      docker_string = SSHKit.config.command_map.docker_string[command.to_sym]
+      return yield unless docker_string
+      "#{docker_string} /bin/bash -c '%s'" % yield
+    end
+
     def to_command
       return command.to_s unless should_map?
-      within do
-        umask do
-          with do
-            user do
-              in_background do
-                group do
-                  to_s
+      docker do
+        within do
+          umask do
+            with do
+              user do
+                in_background do
+                  group do
+                    to_s
+                  end
                 end
               end
             end
