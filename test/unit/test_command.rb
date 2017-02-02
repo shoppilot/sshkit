@@ -4,10 +4,6 @@ require 'sshkit'
 module SSHKit
   class TestCommand < UnitTest
 
-    def setup
-      SSHKit.reset_configuration!
-    end
-
     def test_maps_a_command
       c = Command.new('example')
       assert_equal '/usr/bin/env example', c.to_command
@@ -39,38 +35,50 @@ module SSHKit
     def test_including_the_env
       SSHKit.config = nil
       c = Command.new(:rails, 'server', env: {rails_env: :production})
-      assert_equal "( RAILS_ENV=production /usr/bin/env rails server )", c.to_command
+      assert_equal %{( export RAILS_ENV="production" ; /usr/bin/env rails server )}, c.to_command
     end
 
     def test_including_the_env_with_multiple_keys
       SSHKit.config = nil
       c = Command.new(:rails, 'server', env: {rails_env: :production, foo: 'bar'})
-      assert_equal "( RAILS_ENV=production FOO=bar /usr/bin/env rails server )", c.to_command
+      assert_equal %{( export RAILS_ENV="production" FOO="bar" ; /usr/bin/env rails server )}, c.to_command
     end
 
     def test_including_the_env_with_string_keys
       SSHKit.config = nil
       c = Command.new(:rails, 'server', env: {'FACTER_env' => :production, foo: 'bar'})
-      assert_equal "( FACTER_env=production FOO=bar /usr/bin/env rails server )", c.to_command
+      assert_equal %{( export FACTER_env="production" FOO="bar" ; /usr/bin/env rails server )}, c.to_command
+    end
+
+    def test_double_quotes_are_escaped_in_env
+      SSHKit.config = nil
+      c = Command.new(:rails, 'server', env: {foo: 'asdf"hjkl'})
+      assert_equal %{( export FOO="asdf\\\"hjkl" ; /usr/bin/env rails server )}, c.to_command
+    end
+
+    def test_percentage_symbol_handled_in_env
+      SSHKit.config = nil
+      c = Command.new(:rails, 'server', env: {foo: 'asdf%hjkl'}, user: "anotheruser")
+      assert_equal %{( export FOO="asdf%hjkl" ; sudo -u anotheruser FOO=\"asdf%hjkl\" -- sh -c '/usr/bin/env rails server' )}, c.to_command
     end
 
     def test_including_the_env_doesnt_addressively_escape
       SSHKit.config = nil
       c = Command.new(:rails, 'server', env: {path: '/example:$PATH'})
-      assert_equal "( PATH=/example:$PATH /usr/bin/env rails server )", c.to_command
+      assert_equal %{( export PATH="/example:$PATH" ; /usr/bin/env rails server )}, c.to_command
     end
 
     def test_global_env
       SSHKit.config = nil
       SSHKit.config.default_env = { default: 'env' }
       c = Command.new(:rails, 'server', env: {})
-      assert_equal "( DEFAULT=env /usr/bin/env rails server )", c.to_command
+      assert_equal %{( export DEFAULT="env" ; /usr/bin/env rails server )}, c.to_command
     end
 
     def test_default_env_is_overwritten_with_locally_defined
       SSHKit.config.default_env = { foo: 'bar', over: 'under' }
       c = Command.new(:rails, 'server', env: { over: 'write'})
-      assert_equal "( FOO=bar OVER=write /usr/bin/env rails server )", c.to_command
+      assert_equal %{( export FOO="bar" OVER="write" ; /usr/bin/env rails server )}, c.to_command
     end
 
     def test_working_in_a_given_directory
@@ -80,7 +88,7 @@ module SSHKit
 
     def test_working_in_a_given_directory_with_env
       c = Command.new(:ls, '-l', in: "/opt/sites", env: {a: :b})
-      assert_equal "cd /opt/sites && ( A=b /usr/bin/env ls -l )", c.to_command
+      assert_equal %{cd /opt/sites && ( export A="b" ; /usr/bin/env ls -l )}, c.to_command
     end
 
     def test_having_a_host_passed
@@ -125,7 +133,7 @@ module SSHKit
     def test_umask_with_env_and_working_directory_and_user
       SSHKit.config.umask = '007'
       c = Command.new(:touch, 'somefile', user: 'bob', env: {a: 'b'}, in: '/var')
-      assert_equal "cd /var && umask 007 && ( A=b sudo -u bob A=b -- sh -c '/usr/bin/env touch somefile' )", c.to_command
+      assert_equal %{cd /var && umask 007 && ( export A="b" ; sudo -u bob A="b" -- sh -c '/usr/bin/env touch somefile' )}, c.to_command
     end
 
     def test_verbosity_defaults_to_logger_info
@@ -170,21 +178,54 @@ module SSHKit
       assert c.failed?
     end
 
-    def test_appending_stdout
+    def test_on_stdout
       c = Command.new(:whoami)
-      assert c.stdout += "test\n"
-      assert_equal "test\n", c.stdout
+      c.on_stdout(nil, "test\n")
+      c.on_stdout(nil, 'test2')
+      c.on_stdout(nil, 'test3')
+      assert_equal "test\ntest2test3", c.full_stdout
     end
 
-    def test_appending_stderr
+    def test_on_stderr
       c = Command.new(:whoami)
-      assert c.stderr += "test\n"
-      assert_equal "test\n", c.stderr
+      c.on_stderr(nil, 'test')
+      assert_equal 'test', c.full_stderr
+    end
+
+    def test_deprecated_stdtream_accessors
+      deprecation_out = ''
+      SSHKit.config.deprecation_output = deprecation_out
+
+      c = Command.new(:whoami)
+      c.stdout='a test'
+      assert_equal('a test', c.stdout)
+      c.stderr='another test'
+      assert_equal('another test', c.stderr)
+      deprecation_lines = deprecation_out.lines.to_a
+
+      assert_equal 8, deprecation_lines.size
+      assert_equal(
+        '[Deprecated] The stdout= method on Command is deprecated. ' +
+        "The @stdout attribute will be removed in a future release.\n",
+        deprecation_lines[0])
+      assert_equal(
+        '[Deprecated] The stdout method on Command is deprecated. ' +
+        "The @stdout attribute will be removed in a future release. Use full_stdout() instead.\n",
+        deprecation_lines[2])
+
+      assert_equal(
+        '[Deprecated] The stderr= method on Command is deprecated. ' +
+        "The @stderr attribute will be removed in a future release.\n",
+        deprecation_lines[4])
+      assert_equal(
+        '[Deprecated] The stderr method on Command is deprecated. ' +
+        "The @stderr attribute will be removed in a future release. Use full_stderr() instead.\n",
+        deprecation_lines[6])
     end
 
     def test_setting_exit_status
       c = Command.new(:whoami, raise_on_non_zero_exit: false)
-      assert_equal nil, c.exit_status
+      assert_nil c.exit_status
       assert c.exit_status = 1
       assert_equal 1, c.exit_status
     end

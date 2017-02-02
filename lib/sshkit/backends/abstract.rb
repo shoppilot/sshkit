@@ -4,69 +4,77 @@ module SSHKit
 
     MethodUnavailableError = Class.new(SSHKit::StandardError)
 
+    # The Backend instance that is running in the current thread. If no Backend
+    # is running, returns `nil` instead.
+    #
+    # Example:
+    #
+    #   on(:local) do
+    #     self == SSHKit::Backend.current # => true
+    #   end
+    #
+    def self.current
+      Thread.current["sshkit_backend"]
+    end
+
     class Abstract
+
+      extend Forwardable
+      def_delegators :output, :log, :fatal, :error, :warn, :info, :debug
 
       attr_reader :host
 
       def run
-        # Nothing to do
+        Thread.current["sshkit_backend"] = self
+        instance_exec(@host, &@block)
+      ensure
+        Thread.current["sshkit_backend"] = nil
       end
 
       def initialize(host, &block)
         raise "Must pass a Host object" unless host.is_a? Host
         @host  = host
         @block = block
-      end
 
-      def log(messages)
-        info(messages)
-      end
-
-      def fatal(messages)
-        output << LogMessage.new(Logger::FATAL, messages)
-      end
-
-      def error(messages)
-        output << LogMessage.new(Logger::ERROR, messages)
-      end
-
-      def warn(messages)
-        output << LogMessage.new(Logger::WARN, messages)
-      end
-
-      def info(messages)
-        output << LogMessage.new(Logger::INFO, messages)
-      end
-
-      def debug(messages)
-        output << LogMessage.new(Logger::DEBUG, messages)
-      end
-
-      def trace(messages)
-        output << LogMessage.new(Logger::TRACE, messages)
+        @pwd   = nil
+        @env   = nil
+        @user  = nil
+        @group = nil
       end
 
       def make(commands=[])
-        raise MethodUnavailableError
+        execute :make, commands
       end
 
       def rake(commands=[])
-        raise MethodUnavailableError
+        execute :rake, commands
       end
 
-      def test(command, args=[])
-        raise MethodUnavailableError
+      def test(*args)
+        options = args.extract_options!.merge(raise_on_non_zero_exit: false, verbosity: Logger::DEBUG)
+        create_command_and_execute(args, options).success?
       end
 
-      def execute(command, args=[])
-        raise MethodUnavailableError
+      def capture(*args)
+        options = { verbosity: Logger::DEBUG, strip: true }.merge(args.extract_options!)
+        result = create_command_and_execute(args, options).full_stdout
+        options[:strip] ? result.strip : result
       end
 
-      def capture(command, args=[])
-        raise MethodUnavailableError
+      def background(*args)
+        SSHKit.config.deprecation_logger.log(
+          'The background method is deprecated. Blame badly behaved pseudo-daemons!'
+        )
+        options = args.extract_options!.merge(run_in_background: true)
+        create_command_and_execute(args, options).success?
       end
 
-      def within(directory, &block)
+      def execute(*args)
+        options = args.extract_options!
+        create_command_and_execute(args, options).success?
+      end
+
+      def within(directory, &_block)
         (@pwd ||= []).push directory.to_s
         execute <<-EOTEST, verbosity: Logger::DEBUG
           if test ! -d #{File.join(@pwd)}
@@ -79,16 +87,15 @@ module SSHKit
         @pwd.pop
       end
 
-      def with(environment, &block)
-        @_env = (@env ||= {})
-        @env = @_env.merge environment
+      def with(environment, &_block)
+        env_old = (@env ||= {})
+        @env = env_old.merge environment
         yield
       ensure
-        @env = @_env
-        remove_instance_variable(:@_env)
+        @env = env_old
       end
 
-      def as(who, &block)
+      def as(who, &_block)
         if who.is_a? Hash
           @user  = who[:user]  || who["user"]
           @group = who[:group] || who["group"]
@@ -118,11 +125,32 @@ module SSHKit
         end
       end
 
+      # Backends which extend the Abstract backend should implement the following methods:
+      def upload!(_local, _remote, _options = {}) raise MethodUnavailableError end
+      def download!(_remote, _local=nil, _options = {}) raise MethodUnavailableError end
+      def execute_command(_cmd) raise MethodUnavailableError end
+      private :execute_command # Can inline after Ruby 2.1
+
       private
 
-      def command(*args)
-        options = args.extract_options!
-        SSHKit::Command.new(*[*args, options.merge({in: @pwd.nil? ? nil : File.join(@pwd), env: @env, host: @host, user: @user, group: @group})])
+      def output
+        SSHKit.config.output
+      end
+
+      def create_command_and_execute(args, options)
+        command(args, options).tap { |cmd| execute_command(cmd) }
+      end
+
+      def pwd_path
+        if @pwd.nil? || @pwd.empty?
+          nil
+        else
+          File.join(@pwd)
+        end
+      end
+
+      def command(args, options)
+        SSHKit::Command.new(*args, options.merge({in: pwd_path, env: @env, host: @host, user: @user, group: @group}))
       end
 
     end

@@ -1,35 +1,20 @@
 module SSHKit
   module Backend
 
+    # Printer is used to implement --dry-run in Capistrano
     class Printer < Abstract
 
-      include SSHKit::CommandHelper
-
-      def run
-        instance_exec(host, &@block)
+      def execute_command(cmd)
+        output.log_command_start(cmd)
       end
 
-      def execute(*args)
-        command(*args).tap do |cmd|
-          output << cmd
-        end
-      end
       alias :upload! :execute
       alias :download! :execute
-      alias :test :execute
 
-      def capture(*args)
-        String.new.tap { execute(*args) }
+      def test(*)
+        super
+        true
       end
-      alias :capture! :capture
-
-
-      private
-
-      def output
-        SSHKit.config.output
-      end
-
     end
   end
 end

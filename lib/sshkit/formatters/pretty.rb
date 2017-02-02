@@ -4,75 +4,53 @@ module SSHKit
 
     class Pretty < Abstract
 
+      LEVEL_NAMES = %w{ DEBUG INFO WARN ERROR FATAL }.freeze
+      LEVEL_COLORS = [:black, :blue, :yellow, :red, :red].freeze
+
       def write(obj)
-        return if obj.verbosity < SSHKit.config.output_verbosity
-        case obj
-        when SSHKit::Command    then write_command(obj)
-        when SSHKit::LogMessage then write_log_message(obj)
+        if obj.kind_of?(SSHKit::LogMessage)
+          write_message(obj.verbosity, obj.to_s)
         else
-          original_output << c.black(c.on_yellow("Output formatter doesn't know how to handle #{obj.class}\n"))
+          raise "write only supports formatting SSHKit::LogMessage, called with #{obj.class}: #{obj.inspect}"
         end
       end
-      alias :<< :write
+
+      def log_command_start(command)
+        host_prefix = command.host.user ? "as #{colorize(command.host.user, :blue)}@" : 'on '
+        message = "Running #{colorize(command, :yellow, :bold)} #{host_prefix}#{colorize(command.host, :blue)}"
+        write_message(command.verbosity, message, command.uuid)
+        write_message(Logger::DEBUG, "Command: #{colorize(command.to_command, :blue)}", command.uuid)
+      end
+
+      def log_command_data(command, stream_type, stream_data)
+        color = \
+          case stream_type
+          when :stdout then :green
+          when :stderr then :red
+          else raise "Unrecognised stream_type #{stream_type}, expected :stdout or :stderr"
+          end
+        write_message(Logger::DEBUG, colorize("\t#{stream_data}".chomp, color), command.uuid)
+      end
+
+      def log_command_exit(command)
+        runtime = sprintf('%5.3f seconds', command.runtime)
+        successful_or_failed = command.failure? ? colorize('failed', :red, :bold) : colorize('successful', :green, :bold)
+        message = "Finished in #{runtime} with exit status #{command.exit_status} (#{successful_or_failed})."
+        write_message(command.verbosity, message, command.uuid)
+      end
+
+      protected
+
+      def format_message(verbosity, message, uuid=nil)
+        message = "[#{colorize(uuid, :green)}] #{message}" unless uuid.nil?
+        level = colorize(LEVEL_NAMES[verbosity].rjust(6), LEVEL_COLORS[verbosity])
+        "#{level} #{message}"
+      end
 
       private
 
-      def write_command(command)
-        unless command.started?
-          original_output << "%6s %s\n" % [level(command.verbosity),
-                                           uuid(command) + "Running #{c.yellow(c.bold(String(command)))} #{command.host.user ? "as #{c.blue(command.host.user)}@" : "on "}#{c.blue(command.host.to_s)}"]
-          if SSHKit.config.output_verbosity == Logger::DEBUG
-            original_output << "%6s %s\n" % [level(Logger::DEBUG),
-                                             uuid(command) + "Command: #{c.blue(command.to_command)}"]
-          end
-        end
-
-        if SSHKit.config.output_verbosity == Logger::DEBUG
-          unless command.stdout.empty?
-            command.stdout.lines.each do |line|
-              original_output << "%6s %s" % [level(Logger::DEBUG),
-                                             uuid(command) + c.green("\t" + line)]
-              original_output << "\n" unless line[-1] == "\n"
-            end
-          end
-
-          unless command.stderr.empty?
-            command.stderr.lines.each do |line|
-              original_output << "%6s %s" % [level(Logger::DEBUG),
-                                             uuid(command) + c.red("\t" + line)]
-              original_output << "\n" unless line[-1] == "\n"
-            end
-          end
-        end
-
-        if command.finished?
-          original_output << "%6s %s\n" % [level(command.verbosity),
-                                           uuid(command) + "Finished in #{sprintf('%5.3f seconds', command.runtime)} with exit status #{command.exit_status} (#{c.bold { command.failure? ? c.red('failed') : c.green('successful') }})."]
-        end
-      end
-
-      def write_log_message(log_message)
-        original_output << "%6s %s\n" % [level(log_message.verbosity), log_message.to_s]
-      end
-
-      def c
-        @c ||= Color
-      end
-
-      def uuid(obj)
-        "[#{c.green(obj.uuid)}] "
-      end
-
-      def level(verbosity)
-        c.send(level_formatting(verbosity), level_names(verbosity))
-      end
-
-      def level_formatting(level_num)
-        %w{ black blue yellow red red }[level_num]
-      end
-
-      def level_names(level_num)
-        %w{ DEBUG INFO WARN ERROR FATAL }[level_num]
+      def write_message(verbosity, message, uuid=nil)
+        original_output << "#{format_message(verbosity, message, uuid)}\n" if verbosity >= SSHKit.config.output_verbosity
       end
 
     end

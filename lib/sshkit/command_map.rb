@@ -28,8 +28,6 @@ module SSHKit
 
       def [](command)
         @storage[command] ||= []
-
-        @storage[command]
       end
     end
 
@@ -47,18 +45,20 @@ module SSHKit
       end
     end
 
+    TO_VALUE = ->(obj) { obj.respond_to?(:call) ? obj.call : obj }
+
     def initialize(value = nil)
       @map = CommandHash.new(value || defaults)
     end
 
     def [](command)
       if prefix[command].any?
-        prefixes = prefix[command].map{ |prefix| prefix.respond_to?(:call) ? prefix.call : prefix }
+        prefixes = prefix[command].map(&TO_VALUE)
         prefixes = prefixes.join(" ")
 
         "#{prefixes} #{command}"
       else
-        @map[command]
+        TO_VALUE.(@map[command])
       end
     end
 
@@ -80,7 +80,7 @@ module SSHKit
 
     def defaults
       Hash.new do |hash, command|
-        if %w{if test time}.include? command.to_s
+        if %w{if test time exec}.include? command.to_s
           hash[command] = command.to_s
         else
           hash[command] = "/usr/bin/env #{command}"

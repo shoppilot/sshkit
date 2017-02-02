@@ -1,5 +1,4 @@
 require 'ostruct'
-require 'etc'
 
 module SSHKit
 
@@ -22,29 +21,15 @@ module SSHKit
     end
 
     def initialize(host_string_or_options_hash)
+      @keys  = []
+      @local = false
 
       if host_string_or_options_hash == :local
         @local = true
         @hostname = "localhost"
-        @user = Etc.getpwuid.name
+        @user = ENV['USER'] || ENV['LOGNAME'] || ENV['USERNAME']
       elsif !host_string_or_options_hash.is_a?(Hash)
-        suitable_parsers = [
-          SimpleHostParser,
-          HostWithPortParser,
-          HostWithUsernameAndPortParser,
-          IPv6HostWithPortParser,
-          HostWithUsernameParser,
-        ].select do |p|
-          p.suitable?(host_string_or_options_hash)
-        end
-
-        if suitable_parsers.any?
-          suitable_parsers.first.tap do |parser|
-            @user, @hostname, @port = parser.new(host_string_or_options_hash).attributes
-          end
-        else
-          raise UnparsableHostStringError, "Cannot parse host string #{host_string_or_options_hash}"
-        end
+        @user, @hostname, @port = first_suitable_parser(host_string_or_options_hash).attributes
       else
         host_string_or_options_hash.each do |key, value|
           if self.respond_to?("#{key}=")
@@ -93,6 +78,11 @@ module SSHKit
       @properties ||= OpenStruct.new
     end
 
+    def first_suitable_parser(host)
+      parser = PARSERS.find{|p| p.suitable?(host) }
+      fail UnparsableHostStringError, "Cannot parse host string #{host}" if parser.nil?
+      parser.new(host)
+    end
   end
 
   # @private
@@ -100,7 +90,7 @@ module SSHKit
   class SimpleHostParser
 
     def self.suitable?(host_string)
-      !host_string.match /[:|@]/
+      !host_string.match(/:|@/)
     end
 
     def initialize(host_string)
@@ -128,7 +118,7 @@ module SSHKit
   class HostWithPortParser < SimpleHostParser
 
     def self.suitable?(host_string)
-      !host_string.match /[@|\[|\]]/
+      !host_string.match(/@|\[|\]/)
     end
 
     def port
@@ -145,7 +135,7 @@ module SSHKit
   # :nodoc:
   class HostWithUsernameAndPortParser < SimpleHostParser
     def self.suitable?(host_string)
-      host_string.match /@.*:\d+/
+      host_string.match(/@.*:\d+/)
     end
     def username
       @host_string.split(/:|@/)[0]
@@ -163,7 +153,7 @@ module SSHKit
   class IPv6HostWithPortParser < SimpleHostParser
 
     def self.suitable?(host_string)
-      host_string.match /[a-fA-F0-9:]+:\d+/
+      host_string.match(/[a-fA-F0-9:]+:\d+/)
     end
 
     def port
@@ -190,5 +180,13 @@ module SSHKit
       @host_string.split('@').last
     end
   end
+
+  PARSERS = [
+    SimpleHostParser,
+    HostWithPortParser,
+    HostWithUsernameAndPortParser,
+    IPv6HostWithPortParser,
+    HostWithUsernameParser,
+  ].freeze
 
 end

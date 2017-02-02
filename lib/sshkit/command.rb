@@ -5,37 +5,11 @@ require 'securerandom'
 module SSHKit
 
   # @author Lee Hambley
-  module CommandHelper
-
-    def rake(tasks=[])
-      execute :rake, tasks
-    end
-
-    def make(tasks=[])
-      execute :make, tasks
-    end
-
-    def execute(command, args=[])
-      Command.new(command, args)
-    end
-
-    private
-
-    def map(command)
-      SSHKit.config.command_map[command.to_sym]
-    end
-
-  end
-
-  # @author Lee Hambley
   class Command
 
     Failed = Class.new(SSHKit::StandardError)
 
-    attr_reader :command, :args, :options, :started_at, :started, :exit_status
-
-    attr_accessor :stdout, :stderr
-    attr_accessor :full_stdout, :full_stderr
+    attr_reader :command, :args, :options, :started_at, :started, :exit_status, :full_stdout, :full_stderr
 
     # Initialize a new Command object
     #
@@ -45,14 +19,13 @@ module SSHKit
     # nothing in stdin or stdout
     #
     def initialize(*args)
-      raise ArgumentError, "May not pass no arguments to Command.new" if args.empty?
+      raise ArgumentError, "Must pass arguments to Command.new" if args.empty?
       @options = default_options.merge(args.extract_options!)
       @command = args.shift.to_s.strip.to_sym
       @args    = args
       @options.symbolize_keys!
       sanitize_command!
-      @stdout, @stderr = String.new, String.new
-      @full_stdout, @full_stderr = String.new, String.new
+      @stdout, @stderr, @full_stdout, @full_stderr = String.new, String.new, String.new, String.new
     end
 
     def complete?
@@ -83,6 +56,38 @@ module SSHKit
     end
     alias :failed? :failure?
 
+    def stdout
+      log_reader_deprecation('stdout')
+      @stdout
+    end
+
+    def stdout=(new_value)
+      log_writer_deprecation('stdout')
+      @stdout = new_value
+    end
+
+    def stderr
+      log_reader_deprecation('stderr')
+      @stderr
+    end
+
+    def stderr=(new_value)
+      log_writer_deprecation('stderr')
+      @stderr = new_value
+    end
+
+    def on_stdout(channel, data)
+      @stdout = data
+      @full_stdout += data
+      call_interaction_handler(:stdout, data, channel)
+    end
+
+    def on_stderr(channel, data)
+      @stderr = data
+      @full_stderr += data
+      call_interaction_handler(:stderr, data, channel)
+    end
+
     def exit_status=(new_exit_status)
       @finished_at = Time.now
       @exit_status = new_exit_status
@@ -90,10 +95,8 @@ module SSHKit
       if options[:raise_on_non_zero_exit] && exit_status > 0
         message = ""
         message += "#{command} exit status: " + exit_status.to_s + "\n"
-        message += "#{command} stdout: " + (stdout.strip.empty? ? "Nothing written" : stdout.strip) + "\n"
-
-        stderr_message = [stderr.strip, full_stderr.strip].delete_if(&:empty?).first
-        message += "#{command} stderr: " + (stderr_message || 'Nothing written') + "\n"
+        message += "#{command} stdout: " + (full_stdout.strip.empty? ? "Nothing written" : full_stdout.strip) + "\n"
+        message += "#{command} stderr: " + (full_stderr.strip.empty? ? 'Nothing written' : full_stderr.strip) + "\n"
         raise Failed, message
       end
     end
@@ -127,10 +130,10 @@ module SSHKit
     end
 
     def verbosity
-      if vb = options[:verbosity]
-        case vb.class.name
-        when 'Symbol' then return Logger.const_get(vb.to_s.upcase)
-        when 'Fixnum' then return vb
+      if (vb = options[:verbosity])
+        case vb
+        when Symbol then return Logger.const_get(vb.to_s.upcase)
+        when Integer then return vb
         end
       else
         Logger::INFO
@@ -138,12 +141,12 @@ module SSHKit
     end
 
     def should_map?
-      !command.match /\s/
+      !command.match(/\s/)
     end
 
-    def within(&block)
+    def within(&_block)
       return yield unless options[:in]
-      "cd #{options[:in]} && %s" % yield
+      sprintf("cd #{options[:in]} && %s", yield)
     end
 
     def environment_hash
@@ -152,35 +155,33 @@ module SSHKit
 
     def environment_string
       environment_hash.collect do |key,value|
-        if key.is_a? Symbol
-          "#{key.to_s.upcase}=#{value}"
-        else
-          "#{key.to_s}=#{value}"
-        end
+        key_string = key.is_a?(Symbol) ? key.to_s.upcase : key.to_s
+        escaped_value = value.to_s.gsub(/"/, '\"')
+        %{#{key_string}="#{escaped_value}"}
       end.join(' ')
     end
 
-    def with(&block)
+    def with(&_block)
       return yield unless environment_hash.any?
-      "( #{environment_string} %s )" % yield
+      "( export #{environment_string} ; #{yield} )"
     end
 
-    def user(&block)
+    def user(&_block)
       return yield unless options[:user]
-      "sudo -u #{options[:user]} #{environment_string + " " unless environment_string.empty?}-- sh -c '%s'" % %Q{#{yield}}
+      "sudo -u #{options[:user]} #{environment_string + " " unless environment_string.empty?}-- sh -c '#{yield}'"
     end
 
-    def in_background(&block)
+    def in_background(&_block)
       return yield unless options[:run_in_background]
-      "( nohup %s > /dev/null & )" % yield
+      sprintf("( nohup %s > /dev/null & )", yield)
     end
 
-    def umask(&block)
+    def umask(&_block)
       return yield unless SSHKit.config.umask
-      "umask #{SSHKit.config.umask} && %s" % yield
+      sprintf("umask #{SSHKit.config.umask} && %s", yield)
     end
 
-    def group(&block)
+    def group(&_block)
       return yield unless options[:group]
       "sg #{options[:group]} -c \\\"%s\\\"" % %Q{#{yield}}
       # We could also use the so-called heredoc format perhaps:
@@ -213,7 +214,11 @@ module SSHKit
     end
 
     def to_s
-      [SSHKit.config.command_map[command.to_sym], *Array(args)].join(' ')
+      if should_map?
+        [SSHKit.config.command_map[command.to_sym], *Array(args)].join(' ')
+      else
+        command.to_s
+      end
     end
 
     private
@@ -237,6 +242,24 @@ module SSHKit
       end
     end
 
+    def call_interaction_handler(stream_name, data, channel)
+      interaction_handler = options[:interaction_handler]
+      interaction_handler = MappingInteractionHandler.new(interaction_handler) if interaction_handler.kind_of?(Hash)
+      interaction_handler.on_data(self, stream_name, data, channel) if interaction_handler.respond_to?(:on_data)
+    end
+
+    def log_reader_deprecation(stream)
+      SSHKit.config.deprecation_logger.log(
+        "The #{stream} method on Command is deprecated. " \
+        "The @#{stream} attribute will be removed in a future release. Use full_#{stream}() instead."
+      )
+    end
+
+    def log_writer_deprecation(stream)
+      SSHKit.config.deprecation_logger.log(
+        "The #{stream}= method on Command is deprecated. The @#{stream} attribute will be removed in a future release."
+      )
+    end
   end
 
 end

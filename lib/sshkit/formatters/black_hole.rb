@@ -4,10 +4,9 @@ module SSHKit
 
     class BlackHole < Abstract
 
-      def write(obj)
+      def write(_obj)
         # Nothing, nothing to do
       end
-      alias :<< :write
 
     end
 

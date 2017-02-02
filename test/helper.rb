@@ -1,10 +1,9 @@
 require 'rubygems'
 require 'bundler/setup'
 require 'tempfile'
-require 'minitest/unit'
+require 'minitest/autorun'
+require 'minitest/reporters'
 require 'mocha/setup'
-require 'turn'
-require 'unindent'
 require 'stringio'
 require 'json'
 
@@ -14,20 +13,21 @@ require 'sshkit'
 
 Dir[File.expand_path('test/support/*.rb')].each { |file| require file }
 
-class UnitTest < MiniTest::Unit::TestCase
+class UnitTest < Minitest::Test
 
   def setup
     SSHKit.reset_configuration!
   end
 
   SSHKit::Backend::ConnectionPool.class_eval do
+    alias_method :old_flush_connections, :flush_connections
     def flush_connections
       Thread.current[:sshkit_pool] = {}
     end
   end
 end
 
-class FunctionalTest < MiniTest::Unit::TestCase
+class FunctionalTest < Minitest::Test
 
   def setup
     unless VagrantWrapper.running?
@@ -40,7 +40,7 @@ class FunctionalTest < MiniTest::Unit::TestCase
   def create_user_with_key(username, password = :secret)
     username, password = username.to_s, password.to_s
 
-    keys = VagrantWrapper.hosts.collect do |name, host|
+    keys = VagrantWrapper.hosts.collect do |_name, host|
       Net::SSH.start(host.hostname, host.user, port: host.port, password: host.password) do |ssh|
 
         # Remove the user, make it again, force-generate a key for him
@@ -70,7 +70,7 @@ class FunctionalTest < MiniTest::Unit::TestCase
       end
     end
 
-    Hash[VagrantWrapper.hosts.collect { |n, h| n.to_sym }.zip(keys)]
+    Hash[VagrantWrapper.hosts.collect { |n, _h| n.to_sym }.zip(keys)]
   end
 
 end
@@ -78,7 +78,4 @@ end
 #
 # Force colours in Autotest
 #
-Turn.config.ansi = true
-Turn.config.format = :pretty
-
-MiniTest::Unit.autorun
+Minitest::Reporters.use! Minitest::Reporters::SpecReporter.new

@@ -1,73 +1,73 @@
 require 'helper'
 
 module SSHKit
-
   module Backend
-
     class TestPrinter < UnitTest
 
-      def block_to_run
-        lambda do |host|
-          execute :ls, '-l', '/some/directory'
-        end
+      def setup
+        super
+        SSHKit.config.output = SSHKit::Formatter::Pretty.new(output)
+        SSHKit.config.output_verbosity = Logger::DEBUG
+        Command.any_instance.stubs(:uuid).returns('aaaaaa')
       end
 
-      def backend
-        @backend ||= Printer
-      end
-
-      def teardown
-        @backend = nil
+      def output
+        @output ||= String.new
       end
 
       def printer
-        Printer.new(Host.new(:'example.com'), &block_to_run)
+        @printer ||= Printer.new(Host.new('example.com'))
       end
 
-      def setup
-        SSHKit.config.output_verbosity = :debug
+      def test_execute
+        printer.execute 'uname -a'
+        assert_output_lines(
+          '  INFO [aaaaaa] Running uname -a on example.com',
+          ' DEBUG [aaaaaa] Command: uname -a'
+        )
       end
 
-      def test_simple_printing
-        result = StringIO.new
-        SSHKit.capture_output(result) do
-          printer.run
-        end
-        result.rewind
-        assert_equal "/usr/bin/env ls -l /some/directory\n", result.read
+      def test_test_method
+        assert printer.test('[ -d /some/file ]'), 'test should return true'
+
+        assert_output_lines(
+          ' DEBUG [aaaaaa] Running [ -d /some/file ] on example.com',
+          ' DEBUG [aaaaaa] Command: [ -d /some/file ]'
+        )
       end
 
-      def test_printer_respond_to_configure
-        assert backend.respond_to?(:configure)
+      def test_capture
+        result = printer.capture 'ls -l'
+
+        assert_equal '', result
+
+        assert_output_lines(
+          ' DEBUG [aaaaaa] Running ls -l on example.com',
+          ' DEBUG [aaaaaa] Command: ls -l'
+        )
       end
 
-      def test_printer_any_params_config
-        backend.configure do |ssh|
-          ssh.pty = true
-          ssh.connection_timeout = 30
-          ssh.ssh_options = {
-              keys: %w(/home/user/.ssh/id_rsa),
-              forward_agent: false,
-              auth_methods: %w(publickey password)
-          }
-        end
-
-        assert_equal 30, backend.config.connection_timeout
-        assert_equal true, backend.config.pty
-
-        assert_equal %w(/home/user/.ssh/id_rsa),  backend.config.ssh_options[:keys]
-        assert_equal false,                       backend.config.ssh_options[:forward_agent]
-        assert_equal %w(publickey password),      backend.config.ssh_options[:auth_methods]
+      def test_upload
+        printer.upload! '/some/file', '/remote'
+        assert_output_lines(
+          '  INFO [aaaaaa] Running /usr/bin/env /some/file /remote on example.com',
+          ' DEBUG [aaaaaa] Command: /usr/bin/env /some/file /remote'
+        )
       end
 
-      def test_invoke_raises_no_method_error
-        assert_raises NoMethodError do
-          printer.invoke :echo
-        end
+      def test_download
+        printer.download! 'remote/file', '/local/path'
+        assert_output_lines(
+          '  INFO [aaaaaa] Running /usr/bin/env remote/file /local/path on example.com',
+          ' DEBUG [aaaaaa] Command: /usr/bin/env remote/file /local/path'
+        )
       end
 
+      private
+
+      def assert_output_lines(*expected_lines)
+        assert_equal(expected_lines, output.split("\n"))
+      end
     end
-
   end
-
 end

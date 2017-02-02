@@ -3,16 +3,17 @@ module SSHKit
 
   module Backend
 
-    class TestLocal < MiniTest::Unit::TestCase
+    class TestLocal < Minitest::Test
 
       def setup
+        super
         SSHKit.config.output = SSHKit::Formatter::BlackHole.new($stdout)
       end
 
       def test_capture
         captured_command_result = ''
         Local.new do
-          captured_command_result = capture(:echo, 'foo')
+          captured_command_result = capture(:echo, 'foo', strip: false)
         end.run
         assert_equal "foo\n", captured_command_result
       end
@@ -34,6 +35,18 @@ module SSHKit
         end.run
         assert_equal true,  succeeded_test_result
         assert_equal false, failed_test_result
+      end
+
+      def test_interaction_handler
+        captured_command_result = nil
+        Local.new do
+          command = 'echo Enter Data; read the_data; echo Captured $the_data;'
+          captured_command_result = capture(command, interaction_handler: {
+            "Enter Data\n" => "SOME DATA\n",
+            "Captured SOME DATA\n" => nil
+          })
+        end.run
+        assert_equal("Enter Data\nCaptured SOME DATA", captured_command_result)
       end
     end
   end

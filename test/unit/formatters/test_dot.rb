@@ -1,65 +1,58 @@
 require 'helper'
-require 'sshkit'
 
 module SSHKit
   class TestDot < UnitTest
 
     def setup
+      super
       SSHKit.config.output_verbosity = Logger::DEBUG
     end
 
     def output
-      @_output ||= String.new
+      @output ||= String.new
     end
 
     def dot
-      @_dot ||= SSHKit::Formatter::Dot.new(output)
+      @dot ||= SSHKit::Formatter::Dot.new(output)
     end
 
-    def teardown
-      remove_instance_variable :@_dot
-      remove_instance_variable :@_output
-      SSHKit.reset_configuration!
+    %w(fatal error warn info debug).each do |level|
+      define_method("test_#{level}_output") do
+        dot.send(level, 'Test')
+        assert_log_output('')
+      end
     end
 
-    def test_logging_fatal
-      dot << SSHKit::LogMessage.new(Logger::FATAL, "Test")
-      assert_equal "", output.strip
+    def test_log_command_start
+      dot.log_command_start(SSHKit::Command.new(:ls))
+      assert_log_output('')
     end
 
-    def test_logging_error
-      dot << SSHKit::LogMessage.new(Logger::ERROR, "Test")
-      assert_equal "", output.strip
-    end
-
-    def test_logging_warn
-      dot << SSHKit::LogMessage.new(Logger::WARN, "Test")
-      assert_equal "", output.strip
-    end
-
-    def test_logging_info
-      dot << SSHKit::LogMessage.new(Logger::INFO, "Test")
-      assert_equal "", output.strip
-    end
-
-    def test_logging_debug
-      dot << SSHKit::LogMessage.new(Logger::DEBUG, "Test")
-      assert_equal "", output.strip
+    def test_log_command_data
+      dot.log_command_data(SSHKit::Command.new(:ls), :stdout, 'Some output')
+      assert_log_output('')
     end
 
     def test_command_success
+      output.stubs(:tty?).returns(true)
       command = SSHKit::Command.new(:ls)
       command.exit_status = 0
-      dot << command
-      assert_equal "\e[0;32;49m.\e[0m", output.strip
+      dot.log_command_exit(command)
+      assert_log_output("\e[0;32;49m.\e[0m")
     end
 
     def test_command_failure
+      output.stubs(:tty?).returns(true)
       command = SSHKit::Command.new(:ls, {raise_on_non_zero_exit: false})
       command.exit_status = 1
-      dot << command
-      assert_equal "\e[0;31;49m.\e[0m", output.strip
+      dot.log_command_exit(command)
+      assert_log_output("\e[0;31;49m.\e[0m")
     end
 
+    private
+
+    def assert_log_output(expected_output)
+      assert_equal expected_output, output
+    end
   end
 end

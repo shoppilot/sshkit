@@ -1,3 +1,6 @@
+require 'English'
+require 'strscan'
+require 'mutex_m'
 require 'net/ssh'
 require 'net/scp'
 
@@ -5,6 +8,8 @@ module Net
   module SSH
     class Config
       class << self
+        remove_method :default_files
+
         def default_files
           @@default_files + [File.join(Dir.pwd, '.ssh/config')]
         end
@@ -15,66 +20,28 @@ end
 
 module SSHKit
 
-  class Logger
-
-    class Net::SSH::LogLevelShim
-      attr_reader :output
-      def initialize(output)
-        @output = output
-      end
-      def debug(args)
-        output << LogMessage.new(Logger::TRACE, args)
-      end
-      def error(args)
-        output << LogMessage.new(Logger::ERROR, args)
-      end
-      def lwarn(args)
-        output << LogMessage.new(Logger::WARN, args)
-      end
-    end
-
-  end
-
   module Backend
 
-    class Netssh < Printer
-
+    class Netssh < Abstract
       class Configuration
         attr_accessor :connection_timeout, :pty
         attr_writer :ssh_options
 
         def ssh_options
-          @ssh_options || {}
+          default_options.merge(@ssh_options ||= {})
         end
-      end
 
-      include SSHKit::CommandHelper
+        private
 
-      def run
-        instance_exec(host, &@block)
-      end
-
-      def test(*args)
-        options = args.extract_options!.merge(
-          raise_on_non_zero_exit: false,
-          verbosity: Logger::DEBUG
-        )
-        _execute(*[*args, options]).success?
-      end
-
-      def execute(*args)
-        _execute(*args).success?
-      end
-
-      def background(*args)
-        warn "[Deprecated] The background method is deprecated. Blame badly behaved pseudo-daemons!"
-        options = args.extract_options!.merge(run_in_background: true)
-        _execute(*[*args, options]).success?
-      end
-
-      def capture(*args)
-        options = { verbosity: Logger::DEBUG }.merge(args.extract_options!)
-        _execute(*[*args, options]).full_stdout.strip
+        if Net::SSH::VALID_OPTIONS.include?(:known_hosts)
+          def default_options
+            @default_options ||= {known_hosts: SSHKit::Backend::Netssh::KnownHosts.new}
+          end
+        else
+          def default_options
+            @default_options ||= {}
+          end
+        end
       end
 
       def upload!(local, remote, options = {})
@@ -91,7 +58,12 @@ module SSHKit
         end
       end
 
+      # Note that this pool must be explicitly closed before Ruby exits to
+      # ensure the underlying IO objects are properly cleaned up. We register an
+      # at_exit handler to do this automatically, as long as Ruby is exiting
+      # cleanly (i.e. without an exception).
       @pool = SSHKit::Backend::ConnectionPool.new
+      at_exit { @pool.close_connections if @pool && !$ERROR_INFO }
 
       class << self
         attr_accessor :pool
@@ -110,7 +82,7 @@ module SSHKit
       def transfer_summarizer(action)
         last_name = nil
         last_percentage = nil
-        proc do |ch, name, transferred, total|
+        proc do |_ch, name, transferred, total|
           percentage = (transferred.to_f * 100 / total.to_f)
           unless percentage.nan?
             message = "#{action} #{name} #{percentage.round(2)}%"
@@ -129,69 +101,64 @@ module SSHKit
         end
       end
 
-      def _execute(*args)
-        command(*args).tap do |cmd|
-          output << cmd
-          cmd.started = true
-          with_ssh do |ssh|
-            ssh.open_channel do |chan|
-              chan.request_pty if Netssh.config.pty
-              chan.exec cmd.to_command do |ch, success|
-                chan.on_data do |ch, data|
-                  cmd.stdout = data
-                  cmd.full_stdout += data
-                  output << cmd
-                end
-                chan.on_extended_data do |ch, type, data|
-                  cmd.stderr = data
-                  cmd.full_stderr += data
-                  output << cmd
-                end
-                chan.on_request("exit-status") do |ch, data|
-                  cmd.stdout = ''
-                  cmd.stderr = ''
-                  cmd.exit_status = data.read_long
-                  output << cmd
-                end
-                #chan.on_request("exit-signal") do |ch, data|
-                #  # TODO: This gets called if the program is killed by a signal
-                #  # might also be a worthwhile thing to report
-                #  exit_signal = data.read_string.to_i
-                #  warn ">>> " + exit_signal.inspect
-                #  output << cmd
-                #end
-                chan.on_open_failed do |ch|
-                  # TODO: What do do here?
-                  # I think we should raise something
-                end
-                chan.on_process do |ch|
-                  # TODO: I don't know if this is useful
-                end
-                chan.on_eof do |ch|
-                  # TODO: chan sends EOF before the exit status has been
-                  # writtend
-                end
+      def execute_command(cmd)
+        output.log_command_start(cmd)
+        cmd.started = true
+        exit_status = nil
+        with_ssh do |ssh|
+          ssh.open_channel do |chan|
+            chan.request_pty if Netssh.config.pty
+            chan.exec cmd.to_command do |_ch, _success|
+              chan.on_data do |ch, data|
+                cmd.on_stdout(ch, data)
+                output.log_command_data(cmd, :stdout, data)
               end
-              chan.wait
+              chan.on_extended_data do |ch, _type, data|
+                cmd.on_stderr(ch, data)
+                output.log_command_data(cmd, :stderr, data)
+              end
+              chan.on_request("exit-status") do |_ch, data|
+                exit_status = data.read_long
+              end
+              #chan.on_request("exit-signal") do |ch, data|
+              #  # TODO: This gets called if the program is killed by a signal
+              #  # might also be a worthwhile thing to report
+              #  exit_signal = data.read_string.to_i
+              #  warn ">>> " + exit_signal.inspect
+              #  output.log_command_killed(cmd, exit_signal)
+              #end
+              chan.on_open_failed do |_ch|
+                # TODO: What do do here?
+                # I think we should raise something
+              end
+              chan.on_process do |_ch|
+                # TODO: I don't know if this is useful
+              end
+              chan.on_eof do |_ch|
+                # TODO: chan sends EOF before the exit status has been
+                # writtend
+              end
             end
-            ssh.loop
+            chan.wait
           end
+          ssh.loop
+        end
+        # Set exit_status and log the result upon completion
+        if exit_status
+          cmd.exit_status = exit_status
+          output.log_command_exit(cmd)
         end
       end
 
-      def with_ssh
-        host.ssh_options ||= Netssh.config.ssh_options
-        conn = self.class.pool.checkout(
+      def with_ssh(&block)
+        host.ssh_options = self.class.config.ssh_options.merge(host.ssh_options || {})
+        self.class.pool.with(
+          Net::SSH.method(:start),
           String(host.hostname),
           host.username,
           host.netssh_options,
-          &Net::SSH.method(:start)
+          &block
         )
-        begin
-          yield conn.connection
-        ensure
-          self.class.pool.checkin conn
-        end
       end
 
     end

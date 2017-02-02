@@ -5,9 +5,25 @@ module SSHKit
   class TestConfiguration < UnitTest
 
     def setup
-      SSHKit.config = nil
+      super
       SSHKit.config.command_map.clear
       SSHKit.config.output = SSHKit::Formatter::Pretty.new($stdout)
+    end
+
+    def test_deprecation_output
+      output = ''
+      SSHKit.config.deprecation_output = output
+      SSHKit.config.deprecation_logger.log('Test')
+      assert_equal "[Deprecated] Test\n", output.lines.first
+    end
+
+    def test_default_deprecation_output
+      SSHKit.config.deprecation_logger.log('Test')
+    end
+
+    def test_nil_deprecation_output
+      SSHKit.config.deprecation_output = nil
+      SSHKit.config.deprecation_logger.log('Test')
     end
 
     def test_output
@@ -35,6 +51,12 @@ module SSHKit
       assert SSHKit.config.default_env
     end
 
+    def test_default_runner
+      assert_equal :parallel, SSHKit.config.default_runner
+      SSHKit.config.default_runner = :sequence
+      assert_equal :sequence, SSHKit.config.default_runner
+    end
+
     def test_backend
       assert_equal SSHKit::Backend::Netssh, SSHKit.config.backend
       assert SSHKit.config.backend = SSHKit::Backend::Printer
@@ -51,14 +73,38 @@ module SSHKit
       assert_equal "/opt/sites/example/current/bin ruby", SSHKit.config.command_map[:ruby]
     end
 
-    def test_setting_formatter_to_dot
-      assert SSHKit.config.format = :dot
-      assert SSHKit.config.output.is_a? SSHKit::Formatter::Dot
+    def test_setting_formatter_types
+      {
+        dot:        SSHKit::Formatter::Dot,
+        blackhole:  SSHKit::Formatter::BlackHole,
+        simpletext: SSHKit::Formatter::SimpleText,
+      }.each do |format, expected_class|
+        SSHKit.config.format = format
+        assert SSHKit.config.output.is_a? expected_class
+      end
     end
 
-    def test_setting_formatter_to_blackhole
-      assert SSHKit.config.format = :BlackHole
-      assert SSHKit.config.output.is_a? SSHKit::Formatter::BlackHole
+    def test_prohibits_unknown_formatter_type_with_exception
+      assert_raises(NameError) do
+        SSHKit.config.format = :doesnotexist
+      end
+    end
+
+    def test_options_can_be_provided_to_formatter
+      SSHKit.config.use_format(TestFormatter, :color => false)
+      formatter = SSHKit.config.output
+      assert_instance_of(TestFormatter, formatter)
+      assert_equal($stdout, formatter.output)
+      assert_equal({ :color => false }, formatter.options)
+    end
+
+    class TestFormatter
+      attr_accessor :output, :options
+
+      def initialize(output, options={})
+        @output = output
+        @options = options
+      end
     end
   end
 

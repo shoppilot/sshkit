@@ -4,16 +4,7 @@ module SSHKit
 
   class << self
 
-    attr_accessor :config
-
-    def capture_output(io, &block)
-      original_io = config.output
-      config.output = io
-      config.output.extend(SSHKit::Utils::CaptureOutputMethods)
-      yield
-    ensure
-      config.output = original_io
-    end
+    attr_writer :config
 
     def configure
       @@config ||= Configuration.new

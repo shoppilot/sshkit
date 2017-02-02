@@ -4,35 +4,13 @@ module SSHKit
 
   module Backend
 
-    class Local < Printer
+    class Local < Abstract
 
-      def initialize(&block)
-        @host = Host.new(:local) # just for logging
-        @block = block
+      def initialize(_ = nil, &block)
+        super(Host.new(:local), &block)
       end
 
-      def run
-        instance_exec(@host, &@block)
-      end
-
-      def test(*args)
-        options = args.extract_options!.merge(
-          raise_on_non_zero_exit: false,
-          verbosity: Logger::DEBUG
-        )
-        _execute(*[*args, options]).success?
-      end
-
-      def execute(*args)
-        _execute(*args).success?
-      end
-
-      def capture(*args)
-        options = { verbosity: Logger::DEBUG }.merge(args.extract_options!)
-        _execute(*[*args, options]).full_stdout
-      end
-
-      def upload!(local, remote, options = {})
+      def upload!(local, remote, _options = {})
         if local.is_a?(String)
           FileUtils.cp(local, remote)
         else
@@ -42,7 +20,7 @@ module SSHKit
         end
       end
 
-      def download!(remote, local=nil, options = {})
+      def download!(remote, local=nil, _options = {})
         if local.nil?
           FileUtils.cp(remote, File.basename(remote))
         else
@@ -54,29 +32,32 @@ module SSHKit
 
       private
 
-      def _execute(*args)
-        command(*args).tap do |cmd|
-          output << cmd
+      def execute_command(cmd)
+        output.log_command_start(cmd)
 
-          cmd.started = Time.now
+        cmd.started = Time.now
 
-          stdout, stderr, exit_status =
-            if RUBY_ENGINE == 'jruby'
-              _, o, e, t = Open3.popen3('/usr/bin/env', 'sh', '-c', cmd.to_command)
-              [o.read, e.read, t.value]
-            else
-              Open3.capture3(cmd.to_command)
+        Open3.popen3(cmd.to_command) do |stdin, stdout, stderr, wait_thr|
+          stdout_thread = Thread.new do
+            while (line = stdout.gets) do
+              cmd.on_stdout(stdin, line)
+              output.log_command_data(cmd, :stdout, line)
             end
+          end
 
-          cmd.stdout = stdout
-          cmd.full_stdout += stdout
+          stderr_thread = Thread.new do
+            while (line = stderr.gets) do
+              cmd.on_stderr(stdin, line)
+              output.log_command_data(cmd, :stderr, line)
+            end
+          end
 
-          cmd.stderr = stderr
-          cmd.full_stderr += stderr
+          stdout_thread.join
+          stderr_thread.join
 
-          cmd.exit_status = exit_status.to_i
+          cmd.exit_status = wait_thr.value.to_i
 
-          output << cmd
+          output.log_command_exit(cmd)
         end
       end
 

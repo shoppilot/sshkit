@@ -1,4 +1,5 @@
 require 'helper'
+require 'tempfile'
 
 module SSHKit
   module Backend
@@ -25,7 +26,7 @@ module SSHKit
         assert_equal %w(/home/user/.ssh/id_rsa),  backend.config.ssh_options[:keys]
         assert_equal false,                       backend.config.ssh_options[:forward_agent]
         assert_equal %w(publickey password),      backend.config.ssh_options[:auth_methods]
-
+        assert_instance_of backend::KnownHosts,   backend.config.ssh_options[:known_hosts]
       end
 
       def test_netssh_ext
@@ -53,6 +54,34 @@ module SSHKit
         end
       end
 
+      if Net::SSH::Version::CURRENT >= Net::SSH::Version[3, 1, 0]
+        def test_known_hosts_for_when_all_hosts_are_recognized
+          perform_known_hosts_test('github', 'github.com')
+        end
+
+        def test_known_hosts_for_when_an_host_hash_is_recognized
+          perform_known_hosts_test('github_hash', 'github.com')
+        end
+
+        def test_known_hosts_for_with_multiple_hosts
+          perform_known_hosts_test('github', '192.30.252.123,github.com', 0)
+          perform_known_hosts_test('github_ip', '192.30.252.123,github.com', 1)
+        end
+      end
+
+      private
+
+      def perform_known_hosts_test(hostfile, hostlist, keys_count = 1)
+        source = File.join(File.dirname(__FILE__), '../../known_hosts', hostfile)
+        kh = Netssh::KnownHosts.new
+        keys = kh.search_for(hostlist, user_known_hosts_file: source, global_known_hosts_file: Tempfile.new('sshkit-test').path)
+
+        assert_instance_of ::Net::SSH::HostKeys, keys
+        assert_equal(keys_count, keys.count)
+        keys.each do |key|
+          assert_equal("ssh-rsa", key.ssh_type)
+        end
+      end
     end
   end
 end

@@ -1,5 +1,4 @@
 require 'helper'
-require 'etc'
 
 module SSHKit
 
@@ -46,8 +45,9 @@ module SSHKit
       h = Host.new :local
       assert       h.local?
       assert_nil   h.port
-      assert_equal Etc.getpwuid.name, h.username
-      assert_equal 'localhost',       h.hostname
+      username_candidates = ENV['USER'] || ENV['LOGNAME'] || ENV['USERNAME']
+      assert_equal username_candidates, h.username
+      assert_equal 'localhost',         h.hostname
     end
 
     def test_does_not_confuse_ipv6_hosts_with_port_specification
@@ -65,14 +65,17 @@ module SSHKit
     end
 
     def test_assert_hosts_compare_equal
-      assert Host.new('example.com') == Host.new('example.com')
-      assert Host.new('example.com').eql? Host.new('example.com')
-      assert Host.new('example.com').equal? Host.new('example.com')
+      h1 = Host.new('example.com')
+      h2 = Host.new('example.com')
+
+      assert h1 == h2
+      assert h1.eql? h2
+      assert h1.equal? h2
     end
 
     def test_arbitrary_host_properties
       h = Host.new('example.com')
-      assert_equal nil, h.properties.roles
+      assert_nil h.properties.roles
       assert h.properties.roles = [:web, :app]
       assert_equal [:web, :app], h.properties.roles
     end

@@ -3,10 +3,213 @@
 This file is written in reverse chronological order, newer releases will
 appear at the top.
 
-## (Unreleased)
+## [Unreleased][]
 
-  * Add your entries here, remember to credit yourself however you want to be
-    credited!
+  * Your contribution here!
+
+## [1.11.5][] (2016-12-16)
+
+### Bug fixes
+
+  * Do not prefix `exec` command
+    [PR #378](https://github.com/capistrano/sshkit/pull/378) @dreyks
+
+## [1.11.4][] (2016-11-02)
+
+  * Use string interpolation for environment variables to avoid escaping issues
+    with sprintf
+    [PR #280](https://github.com/capistrano/sshkit/pull/280)
+    @Sinjo - Chris Sinjakli
+
+## [1.11.3][] (2016-09-16)
+
+  * Fix known_hosts caching to match on the entire hostlist
+    [PR #364](https://github.com/capistrano/sshkit/pull/364) @byroot
+
+## [1.11.2][] (2016-07-29)
+
+### Bug fixes
+
+  * Fixed a crash occurring when `Host@keys` was set to a non-Enumerable.
+    @xavierholt [PR #360](https://github.com/capistrano/sshkit/pull/360)
+
+## [1.11.1][] (2016-06-17)
+
+### Bug fixes
+
+  * Fixed a regression in 1.11.0 that would cause
+    `ArgumentError: invalid option(s): known_hosts` in some older versions of
+    net-ssh. @byroot [#357](https://github.com/capistrano/sshkit/issues/357)
+
+## [1.11.0][] (2016-06-14)
+
+### Bug fixes
+
+  * Fixed colorized output alignment in Logger::Pretty. @xavierholt
+    [PR #349](https://github.com/capistrano/sshkit/pull/349)
+  * Fixed a bug that prevented nested `with` calls
+    [#43](https://github.com/capistrano/sshkit/issues/43)
+
+### Other changes
+
+  * Known hosts lookup optimization is now enabled by default. @byroot
+
+## 1.10.0 (2016-04-22)
+
+  * You can now opt-in to caching of SSH's known_hosts file for a speed boost
+    when deploying to a large fleet of servers. Refer to the
+    [README](https://github.com/capistrano/sshkit/tree/v1.10.0#known-hosts-caching) for
+    details. We plan to turn this on by default in a future version of SSHKit.
+    [PR #330](https://github.com/capistrano/sshkit/pull/330) @byroot
+  * SSHKit now explicitly closes its pooled SSH connections when Ruby exits;
+    this fixes `zlib(finalizer): the stream was freed prematurely` warnings
+    [PR #343](https://github.com/capistrano/sshkit/pull/343) @mattbrictson
+  * Allow command map entries (`SSHKit::CommandMap#[]`) to be Procs
+    [PR #310](https://github.com/capistrano/sshkit/pull/310)
+    @mikz
+
+## 1.9.0
+
+**Refer to the 1.9.0.rc1 release notes for a full list of new features, fixes,
+and potentially breaking changes since SSHKit 1.8.1.** There are no changes
+since 1.9.0.rc1.
+
+## 1.9.0.rc1
+
+### Potentially breaking changes
+
+  * The SSHKit DSL is no longer automatically included when you `require` it.
+    **This means you  must now explicitly `include SSHKit::DSL`.**
+    See [PR #219](https://github.com/capistrano/sshkit/pull/219) for details.
+    @beatrichartz
+  * `SSHKit::Backend::Printer#test` now always returns true
+    [PR #312](https://github.com/capistrano/sshkit/pull/312) @mikz
+
+### New features
+
+  * `SSHKit::Formatter::Abstract` now accepts an optional Hash of options
+    [PR #308](https://github.com/capistrano/sshkit/pull/308) @mattbrictson
+  * Add `SSHKit::Backend.current` so that Capistrano plugin authors can refactor
+    helper methods and still have easy access to the currently-executing Backend
+    without having to use global variables.
+  * Add `SSHKit.config.default_runner` options that allows to override default command runner.
+    This option also accepts a name of the custom runner class.
+  * The ConnectionPool has been rewritten in this release to be more efficient
+    and have a cleaner internal API. You can still completely disable the pool
+    by setting `SSHKit::Backend::Netssh.pool.idle_timeout = 0`.
+    @mattbrictson @byroot [PR #328](https://github.com/capistrano/sshkit/pull/328)
+
+### Bug fixes
+
+  * make sure working directory for commands is properly cleared after `within` blocks
+    [PR #307](https://github.com/capistrano/sshkit/pull/307)
+    @steved
+  * display more accurate string for commands with spaces being output in `Formatter::Pretty`
+    [PR #304](https://github.com/capistrano/sshkit/pull/304)
+    @steved
+    [PR #319](https://github.com/capistrano/sshkit/pull/319) @mattbrictson
+  * Fix a race condition experienced in JRuby that could cause multi-server
+    deploys to fail. [PR #322](https://github.com/capistrano/sshkit/pull/322)
+    @mattbrictson
+
+## 1.8.1
+
+  * Change license to MIT, thanks to all the patient contributors who gave
+    their permissions.
+
+## 1.8.0
+
+  * add SSHKit::Backend::ConnectionPool#close_connections
+    [PR #285](https://github.com/capistrano/sshkit/pull/285)
+    @akm
+  * Clean up rubocop lint warnings
+    [PR #275](https://github.com/capistrano/sshkit/pull/275)
+    @cshaffer
+    * Prepend unused parameter names with an underscore
+    * Prefer “safe assignment in condition”
+    * Disambiguate regexp literals with parens
+    * Prefer `sprintf` over `String#%`
+    * No longer shadow `caller_line` variable in `DeprecationLogger`
+    * Rescue `StandardError` instead of `Exception`
+    * Remove useless `private` access modifier in `TestAbstract`
+    * Disambiguate block operator with parens
+    * Disambiguate between grouped expression and method params
+    * Remove assertion in `TestHost#test_assert_hosts_compare_equal` that compares something with itself
+  * Export environment variables and execute command in a subshell.
+    [PR #273](https://github.com/capistrano/sshkit/pull/273)
+    @kuon
+  * Introduce `log_command_start`, `log_command_data`, `log_command_exit` methods on `Formatter`
+    [PR #257](https://github.com/capistrano/sshkit/pull/257)
+    @robd
+    * Deprecate `@stdout` and `@stderr` accessors on `Command`
+  * Add support for deprecation logging options.
+    [README](README.md#deprecation-warnings),
+    [PR #258](https://github.com/capistrano/sshkit/pull/258)
+    @robd
+  * Quote environment variable values.
+    [PR #250](https://github.com/capistrano/sshkit/pull/250)
+    @Sinjo - Chris Sinjakli
+  * Simplified formatter hierarchy.
+    [PR #248](https://github.com/capistrano/sshkit/pull/248)
+    @robd
+    * `SimpleText` formatter now extends `Pretty`, rather than duplicating.
+  * Hide ANSI color escape sequences when outputting to a file.
+    [README](README.md#output-colors),
+    [Issue #245](https://github.com/capistrano/sshkit/issues/245),
+    [PR #246](https://github.com/capistrano/sshkit/pull/246)
+    @robd
+    * Now only color the output if it is associated with a tty,
+      or the `SSHKIT_COLOR` environment variable is set.
+  * Removed broken support for assigning an `IO` to the `output` config option.
+    [Issue #243](https://github.com/capistrano/sshkit/issues/243),
+    [PR #244](https://github.com/capistrano/sshkit/pull/244)
+    @robd
+    * Use `SSHKit.config.output = SSHKit::Formatter::SimpleText.new($stdin)` instead
+  * Added support for `:interaction_handler` option on commands.
+    [PR #234](https://github.com/capistrano/sshkit/pull/234),
+    [PR #242](https://github.com/capistrano/sshkit/pull/242)
+    @robd
+  * Removed partially supported `TRACE` log level.
+    [2aa7890](https://github.com/capistrano/sshkit/commit/2aa78905f0c521ad9f697e7a4ed04ba438d5ee78)
+    @robd
+  * Add support for the `:strip` option to the `capture` method and strip by default on the `Local` backend.
+    [PR #239](https://github.com/capistrano/sshkit/pull/239),
+    [PR #249](https://github.com/capistrano/sshkit/pull/249)
+    @robd
+    * The `Local` backend now strips by default to be consistent with the `Netssh` one.
+    * This reverses change [7d15a9a](https://github.com/capistrano/sshkit/commit/7d15a9aebfcc43807c8151bf6f3a4bc038ce6218) to the `Local` capture API to remove stripping by default.
+    * If you require the raw, unstripped output, pass the `strip: false` option: `capture(:ls, strip: false)`
+  * Simplified backend hierarchy.
+    [PR #235](https://github.com/capistrano/sshkit/pull/235),
+    [PR #237](https://github.com/capistrano/sshkit/pull/237)
+    @robd
+    * Moved duplicate implementations of `make`, `rake`, `test`, `capture`, `background` on to `Abstract` backend.
+    * Backend implementations now only need to implement `execute_command`, `upload!` and `download!`
+    * Removed `Printer` from backend hierarchy for `Local` and `Netssh` backends (they now just extend `Abstract`)
+    * Removed unused `Net::SSH:LogLevelShim`
+  * Removed dependency on the `colorize` gem. SSHKit now implements its own ANSI color logic, with no external dependencies. Note that SSHKit now only supports the `:bold` or plain modes. Other modes will be gracefully ignored. [#263](https://github.com/capistrano/sshkit/issues/263)
+  * New API for setting the formatter: `use_format`. This differs from `format=` in that it accepts options or arguments that will be passed to the formatter's constructor. The `format=` syntax will be deprecated in a future release. [#295](https://github.com/capistrano/sshkit/issues/295)
+  * SSHKit now immediately raises a `NameError` if you try to set a formatter that does not exist. [#295](https://github.com/capistrano/sshkit/issues/295)
+  * Fix error message when the formatter does not exist. [#301](https://github.com/capistrano/sshkit/pull/301)
+
+## 1.7.1
+
+  * Fix a regression in 1.7.0 that caused command completion messages to be removed from log output. @mattbrictson
+
+## 1.7.0
+
+  * Update Vagrantfile to use multi-provider Hashicorp precise64 box - remove URLs. @townsen
+  * Merge host ssh_options and Netssh defaults @townsen
+    Previously if host-level ssh_options were defined the Netssh defaults
+    were ignored.
+  * Merge host ssh_options and Netssh defaults
+  * Fixed race condition where output of failed command would be empty. @townsen
+    Caused random failures of `test_execute_raises_on_non_zero_exit_status_and_captures_stdout_and_stderr`
+    Also fixes output handling in failed commands, and generally buggy output.
+  * Remove override of backtrace() and backtrace_locations() from ExecuteError. @townsen
+    This interferes with rake default behaviour and creates duplicate stacktraces.
+  * Allow running local commands using `on(:local)`
+  * Implement the upload! and download! methods for the local backend
 
 ## 1.6.0
 
@@ -458,3 +661,11 @@ version `0.0.5`.
 ## 0.0.1
 
 First release.
+
+[Unreleased]: https://github.com/capistrano/sshkit/compare/v1.11.5...HEAD
+[1.11.5]: https://github.com/capistrano/sshkit/compare/v1.11.4...v1.11.5
+[1.11.4]: https://github.com/capistrano/sshkit/compare/v1.11.3...v1.11.4
+[1.11.3]: https://github.com/capistrano/sshkit/compare/v1.11.2...v1.11.3
+[1.11.2]: https://github.com/capistrano/sshkit/compare/v1.11.1...v1.11.2
+[1.11.1]: https://github.com/capistrano/sshkit/compare/v1.11.0...v1.11.1
+[1.11.0]: https://github.com/capistrano/sshkit/compare/v1.10.0...v1.11.0
